@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shakemod",
+  "version": "${version}",
+  "name": "ShakeMod",
+  "description": "",
+  "authors": [
+    "DVMN2"
+  ],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/shakemod/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "net.dvmn2.shakemod.client.ShakeModDataGenerator"
+    ],
+    "client": [
+      "net.dvmn2.shakemod.client.ShakeModClient"
+    ],
+    "main": [
+      "net.dvmn2.shakemod.ShakeMod"
+    ]
+  },
+  "mixins": [
+    "shakemod.mixins.json",
+    {
+      "config": "shakemod.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
