@@ -23,7 +23,6 @@
     ]
   },
   "mixins": [
-    "shakemod.mixins.json",
     {
       "config": "shakemod.client.mixins.json",
       "environment": "client"

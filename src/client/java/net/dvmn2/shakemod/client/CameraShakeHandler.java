@@ -1,4 +1,4 @@
-package net.dvmn2.bmcmod.client.shake;
+package net.dvmn2.shakemod.client;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.random.Random;
