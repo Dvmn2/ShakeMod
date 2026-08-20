@@ -9,14 +9,14 @@ public class CameraShakeHandler {
 
     private static final Random RANDOM = Random.create();
 
-    private static float rotationIntensity = 0f;
-    private static float positionIntensity = 0f;
+    private static float rotation = 0f;
+    private static float position = 0f;
     private static int ticksLeft = 0;
     private static int totalDuration = 0; // изначальная длительность — нужна для расчёта затухания
 
-    public static void start(int intensity, int power, int duration) {
-        rotationIntensity = intensity;
-        positionIntensity = power * POSITION_SCALE;
+    public static void start(int angle_delta, int position_delta, int duration) {
+        rotation = angle_delta;
+        position = position_delta * POSITION_SCALE;
         ticksLeft = duration;
         totalDuration = duration;
     }
@@ -34,19 +34,19 @@ public class CameraShakeHandler {
     }
 
     public static float getYawOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * rotationIntensity * fadeFactor() : 0f;
+        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * rotation * fadeFactor() : 0f;
     }
 
     public static float getPitchOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * rotationIntensity * fadeFactor() : 0f;
+        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * rotation * fadeFactor() : 0f;
     }
 
     public static float getRightOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * positionIntensity * fadeFactor() : 0f;
+        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * position * fadeFactor() : 0f;
     }
 
     public static float getUpOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * positionIntensity * fadeFactor() : 0f;
+        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * position * fadeFactor() : 0f;
     }
 
     public static boolean isShaking() {

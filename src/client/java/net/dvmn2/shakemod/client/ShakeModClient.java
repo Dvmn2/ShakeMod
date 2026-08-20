@@ -13,7 +13,7 @@ public class ShakeModClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(CameraShakePayload.ID, (payload, context) -> {
             context.client().execute(() ->
-                    CameraShakeHandler.start(payload.intensity(), payload.power(), payload.duration()));
+                    CameraShakeHandler.start(payload.angle_delta(), payload.position_delta(), payload.duration()));
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(CameraShakeHandler::tick);
