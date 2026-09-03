@@ -3,16 +3,24 @@ package net.dvmn2.shakemod.client;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.random.Random;
 
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
 /**
  * Класс отвечает за состояние тряски камеры на стороне клиента.
- * Хранит текущие параметры эффекта (амплитуда поворота/смещения, оставшееся
- * и общее время действия) и на каждый тик пересчитывает величину затухания.
  * <p>
- * Логика полностью статическая, так как тряска камеры — это глобальный
- * эффект клиента, а не привязанный к конкретной сущности объект. Само
- * применение смещения к камере происходит не здесь, а в
+ * Поддерживает НЕСКОЛЬКО одновременных независимых тряcок: каждая живёт
+ * своим таймером/затуханием, а итоговое смещение камеры — сумма вкладов
+ * всех активных на данный момент тряcок. Благодаря этому, если поверх
+ * длинной тряски накладывается короткая, в момент наложения амплитуды
+ * складываются, а после окончания короткой — длинная продолжает трясти
+ * камеру как ни в чём не бывало.
+ * <p>
+ * Само применение смещения к камере происходит не здесь, а в
  * {@link net.dvmn2.shakemod.client.mixin.ShakeMixin} — этот класс только
- * хранит состояние и отдаёт готовые значения смещений по запросу.
+ * хранит состояние всех активных тряcок и отдаёт суммарные значения
+ * смещений по запросу.
  */
 public class CameraShakeHandler {
 
@@ -27,94 +35,127 @@ public class CameraShakeHandler {
     private static final Random RANDOM = Random.create();
 
     /**
-     * Максимальная амплитуда поворота камеры (в градусах) на текущий момент тряски.
+     * Список всех активных тряcок. Работаем с ним только на клиентском
+     * main-потоке (tick() вызывается из END_CLIENT_TICK, а входящий пакет
+     * оборачивается в context.client().execute(...) в ShakeModClient),
+     * поэтому обычный ArrayList безопасен — синхронизация не нужна.
      */
-    private static float rotation = 0f;
+    private static final List<ShakeInstance> shakes = new ArrayList<>();
 
     /**
-     * Максимальная амплитуда смещения камеры (в блоках, уже с учётом POSITION_SCALE).
+     * Одна независимая тряска: свои амплитуды, свой прогресс и своё затухание.
      */
-    private static float position = 0f;
+    private static final class ShakeInstance {
+        final float rotation;
+        final float position;
+        final int totalDuration;
+        int ticksLeft;
+
+        ShakeInstance(int angle_delta, int position_delta, int duration) {
+            this.rotation = angle_delta;
+            this.position = position_delta * POSITION_SCALE;
+            this.totalDuration = duration;
+            this.ticksLeft = duration;
+        }
+
+        /**
+         * Коэффициент затухания ЭТОЙ КОНКРЕТНОЙ тряски: 1 в начале, 0 в конце.
+         * Квадратичная кривая — тряска "успокаивается" быстрее к концу.
+         */
+        float fadeFactor() {
+            if (totalDuration <= 0) return 0f;
+            float t = (float) ticksLeft / (float) totalDuration; // 1 -> 0
+            return t * t;
+        }
+    }
 
     /**
-     * Сколько тиков осталось до окончания тряски.
-     */
-    private static int ticksLeft = 0;
-
-    /**
-     * Изначальная длительность — нужна для расчёта коэффициента затухания.
-     */
-    private static int totalDuration = 0;
-
-    /**
-     * Запускает (или перезапускает — если тряска уже шла, новая перекроет старую)
-     * эффект тряски камеры.
+     * Запускает новый, независимый эффект тряски камеры, ДОБАВЛЯЯ его
+     * к уже идущим (если они есть), а не заменяя их.
      *
      * @param angle_delta    максимальный угол отклонения камеры (градусы)
      * @param position_delta максимальное смещение камеры (в "сырых" единицах, см. POSITION_SCALE)
      * @param duration       длительность эффекта в тиках
      */
     public static void start(int angle_delta, int position_delta, int duration) {
-        rotation = angle_delta;
-        position = position_delta * POSITION_SCALE;
-        ticksLeft = duration;
-        totalDuration = duration;
+        if (duration < 0) return; // тряска отрицательной длительности не имеет смысла
+        if (duration == 0) {      // считаем тряску нулевой длительности за сброс инстансов
+            shakes.clear();
+            return;
+        }
+        shakes.add(new ShakeInstance(angle_delta, position_delta, duration));
     }
 
     /**
-     * Вызывается каждый клиентский тик (см. {@link ShakeModClient}), просто
-     * уменьшает оставшееся время тряски. Само дрожание камеры считается
-     * "лениво", по запросу, через getXxxOffset()-методы ниже.
+     * Вызывается каждый клиентский тик (см. {@link ShakeModClient}).
+     * Уменьшает оставшееся время у КАЖДОЙ активной тряски и удаляет те,
+     * что закончились. Само дрожание камеры считается "лениво", по
+     * запросу, через getXxxOffset()-методы ниже.
      */
     public static void tick(MinecraftClient client) {
-        if (ticksLeft > 0) {
-            ticksLeft--;
+        if (shakes.isEmpty()) return;
+
+        Iterator<ShakeInstance> it = shakes.iterator();
+        while (it.hasNext()) {
+            ShakeInstance s = it.next();
+            if (s.ticksLeft > 0) {
+                s.ticksLeft--;
+            }
+            if (s.ticksLeft <= 0) {
+                it.remove();
+            }
         }
     }
 
     /**
-     * Коэффициент затухания тряски: 1 в начале эффекта, 0 в самом конце.
-     * Используется квадратичная кривая (t^2), а не линейная — тряска
-     * "успокаивается" быстрее к концу, что визуально выглядит естественнее.
-     */
-    private static float fadeFactor() {
-        if (totalDuration <= 0) return 0f;
-        float t = (float) ticksLeft / (float) totalDuration; // 1 -> 0
-        return t * t; // квадратичное затухание
-    }
-
-    /**
-     * Случайное смещение по рысканию (yaw) камеры на текущий момент вызова.
+     * Суммарное случайное смещение по рысканию (yaw) камеры — сумма вкладов
+     * всех активных тряcок, каждая со своей амплитудой и своим затуханием.
      */
     public static float getYawOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * rotation * fadeFactor() : 0f;
+        float sum = 0f;
+        for (ShakeInstance s : shakes) {
+            sum += (RANDOM.nextFloat() - 0.5f) * s.rotation * s.fadeFactor();
+        }
+        return sum;
     }
 
     /**
-     * Случайное смещение по тангажу (pitch) камеры на текущий момент вызова.
+     * Суммарное случайное смещение по тангажу (pitch) камеры.
      */
     public static float getPitchOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * rotation * fadeFactor() : 0f;
+        float sum = 0f;
+        for (ShakeInstance s : shakes) {
+            sum += (RANDOM.nextFloat() - 0.5f) * s.rotation * s.fadeFactor();
+        }
+        return sum;
     }
 
     /**
-     * Случайное смещение камеры вдоль её локальной горизонтальной оси ("вправо/влево").
+     * Суммарное случайное смещение камеры вдоль локальной горизонтальной оси.
      */
     public static float getRightOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * position * fadeFactor() : 0f;
+        float sum = 0f;
+        for (ShakeInstance s : shakes) {
+            sum += (RANDOM.nextFloat() - 0.5f) * s.position * s.fadeFactor();
+        }
+        return sum;
     }
 
     /**
-     * Случайное смещение камеры вдоль её локальной вертикальной оси ("вверх/вниз").
+     * Суммарное случайное смещение камеры вдоль локальной вертикальной оси.
      */
     public static float getUpOffset() {
-        return ticksLeft > 0 ? (RANDOM.nextFloat() - 0.5f) * position * fadeFactor() : 0f;
+        float sum = 0f;
+        for (ShakeInstance s : shakes) {
+            sum += (RANDOM.nextFloat() - 0.5f) * s.position * s.fadeFactor();
+        }
+        return sum;
     }
 
     /**
-     * true, если тряска сейчас активна (остались тики).
+     * true, если есть хотя бы одна активная тряска.
      */
     public static boolean isShaking() {
-        return ticksLeft > 0;
+        return !shakes.isEmpty();
     }
 }
